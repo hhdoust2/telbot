@@ -3,10 +3,16 @@ const axios = require('axios');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// منوی اصلی دکمه‌ای
+// ۱. منوی اصلی ربات
 const mainMenu = Markup.keyboard([
-    ['💰 قیمت ارز و طلا', '🤖 سوال از هوش مصنوعی'],
+    ['📊 قیمت ارز دیجیتال', '🤖 سوال از هوش مصنوعی'],
     ['🌤 وضعیت آب و هوا']
+]).resize();
+
+// ۲. منوی انتخاب شهرها (که جایگزین کیبورد اصلی می‌شود)
+const weatherMenu = Markup.keyboard([
+    ['📍 تهران', '📍 یاسوج'],
+    ['📍 دهدشت', '🔙 بازگشت به منوی اصلی']
 ]).resize();
 
 // دستور /start
@@ -14,49 +20,74 @@ bot.start((ctx) => {
     ctx.reply('سلام! به ربات پیشرفته خوش آمدید. یکی از گزینه‌های زیر را انتخاب کنید:', mainMenu);
 });
 
-// ۱. بخش آب و هوا (اصلاح شده بر اساس دکمه)
+// بازگشت به منوی اصلی
+bot.hears('🔙 بازگشت به منوی اصلی', (ctx) => {
+    ctx.reply('به منوی اصلی برگشتید:', mainMenu);
+});
+
+// وقتی کاربر دکمه آب و هوا را می‌زند، منوی شهرها باز می‌شود
 bot.hears('🌤 وضعیت آب و هوا', (ctx) => {
-    ctx.reply('لطفاً دستور آب‌وهوا را همراه با نام شهر به انگلیسی بفرستید. مثلاً:\n/weather tehran');
+    ctx.reply('لطفاً شهر مورد نظر خود را انتخاب کنید:', weatherMenu);
 });
 
-bot.command('weather', async (ctx) => {
-    const messageText = ctx.message.text;
-    const cityName = messageText.split(' ')[1];
-    if (!cityName) return ctx.reply('لطفاً نام شهر را وارد کنید. مثلاً: /weather tehran');
-
+// تابع مشترک برای گرفتن آب و هوا بر اساس نام انگلیسی شهر
+async function getWeatherData(ctx, cityNameEn, cityNameFa) {
     try {
-        const response = await axios.get(`https://wttr.in/${cityName}?format=j1`);
+        const response = await axios.get(`https://wttr.in/${cityNameEn}?format=j1`);
         const currentCondition = response.data.current_condition[0];
-        const report = `🌤 آب و هوای *${cityName.toUpperCase()}*:\n\n🌡 دما: ${currentCondition.temp_C}°C\n💧 رطوبت: ${currentCondition.humidity}%`;
-        ctx.replyWithMarkdown(report);
-    } catch {
-        ctx.reply('خطا در دریافت اطلاعات آب‌وهوا.');
-    }
-});
+        const temp = currentCondition.temp_C;
+        const humidity = currentCondition.humidity;
+        const weatherDesc = currentCondition.weatherDesc[0].value;
 
-// ۲. بخش قیمت ارز و طلا
-bot.hears('💰 قیمت ارز و طلا', async (ctx) => {
-    await ctx.reply('🔄 در حال دریافت قیمت‌های زنده...');
-    try {
-        // استفاده از یک API عمومی برای قیمت ارزها (به عنوان نمونه)
-        const response = await axios.get('https://open.er-api.com/v6/latest/USD');
-        const rates = response.data.rates;
-        
-        // محاسبه نرخ‌های حدودی یا نمایش ارزهای جهانی (یا APIهای ایرانی در صورت داشتن دسترسی)
-        const report = `💰 **نرخ برابری ارزها (پایه USD):**\n\n` +
-                       `🇪🇺 یورو (EUR): ${rates.EUR.toFixed(2)}\n` +
-                       `🇬🇧 پوند (GBP): ${rates.GBP.toFixed(2)}\n` +
-                       `🇦🇪 درهم (AED): ${rates.AED.toFixed(2)}\n` +
-                       `🇯🇵 ین (JPY): ${rates.JPY.toFixed(2)}\n\n` +
-                       `💡 _نکته: این قیمت‌ها از بازارهای جهانی دریافت شده‌اند._`;
-        
+        const report = `🌤 وضعیت آب و هوای *${cityNameFa}*:\n\n` +
+                       `🌡 دما: ${temp}°C\n` +
+                       `💧 رطوبت: ${humidity}%\n` +
+                       `📝 وضعیت: ${weatherDesc}`;
+
         ctx.replyWithMarkdown(report);
     } catch (error) {
-        ctx.reply('❌ متأسفانه در حال حاضر امکان دریافت قیمت ارز وجود ندارد.');
+        ctx.reply(`❌ خطا در دریافت اطلاعات آب‌وهوای ${cityNameFa}. لطفاً دوباره تلاش کنید.`);
+    }
+}
+
+// پاسخ به دکمه‌های هر شهر
+bot.hears('📍 تهران', (ctx) => getWeatherData(ctx, 'tehran', 'تهران'));
+bot.hears('📍 یاسوج', (ctx) => getWeatherData(ctx, 'yasuj', 'یاسوج'));
+bot.hears('📍 دهدشت', (ctx) => getWeatherData(ctx, 'dehdasht', 'دهدشت'));
+
+
+// ۳. بخش قیمت ارزهای دیجیتال از صرافی بایننس (Binance)
+bot.hears('📊 قیمت ارز دیجیتال', async (ctx) => {
+    await ctx.reply('🔄 در حال دریافت قیمت‌های لحظه‌ای از صرافی بایننس...');
+    try {
+        const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'TONUSDT', 'XRPUSDT', 'NEARUSDT', 'SUIUSDT', 'ADAUSDT', 'CRVUSDT'];
+        const url = `https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(symbols)}`;
+        
+        const response = await axios.get(url);
+        const tickerList = response.data;
+
+        let report = `📊 **قیمت لحظه‌ای رمزارزها در صرافی Binance:**\n\n`;
+
+        tickerList.forEach(coin => {
+            const symbol = coin.symbol.replace('USDT', '');
+            const price = parseFloat(coin.lastPrice);
+            const change = parseFloat(coin.priceChangePercent);
+            
+            const formattedPrice = price >= 1 ? price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : price;
+            const emoji = change >= 0 ? '🟢' : '🔴';
+            const plusSign = change >= 0 ? '+' : '';
+
+            report += `🪙 **${symbol}**: $${formattedPrice} (${emoji} ${plusSign}${change.toFixed(2)}%)\n`;
+        });
+
+        report += `\n⏰ _قیمت‌ها کاملاً زنده و بدون تأخیر هستند._`;
+        ctx.replyWithMarkdown(report);
+    } catch (error) {
+        ctx.reply('❌ مشکلی در دریافت قیمت‌ها از بایننس رخ داد.');
     }
 });
 
-// ۳. بخش هوش مصنوعی
+// ۴. بخش هوش مصنوعی
 bot.hears('🤖 سوال از هوش مصنوعی', (ctx) => {
     ctx.reply('برای پرسش از هوش مصنوعی، متن خود را همراه با دستور /ai بفرستید. مثلاً:\n\n/ai چرا آسمان آبی است؟');
 });
@@ -72,13 +103,12 @@ bot.command('ai', async (ctx) => {
     await ctx.reply('🤖 در حال فکر کردن...');
 
     try {
-        // اتصال به یک API رایگان و بدون تحریم هوش مصنوعی (مدل Llama یا مشابه)
         const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: "meta-llama/llama-3-8b-instruct:free", // یک مدل کاملاً رایگان در OpenRouter
+            model: "meta-llama/llama-3-8b-instruct:free",
             messages: [{ role: "user", content: prompt }]
         }, {
             headers: {
-                'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`, // بعداً این توکن را در ورسل ست می‌کنیم
+                'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -86,7 +116,6 @@ bot.command('ai', async (ctx) => {
         const replyText = response.data.choices[0].message.content;
         ctx.reply(replyText);
     } catch (error) {
-        console.error(error);
         ctx.reply('❌ مشکلی در اتصال به هوش مصنوعی به وجود آمد.');
     }
 });
