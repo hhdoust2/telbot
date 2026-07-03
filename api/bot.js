@@ -1,24 +1,46 @@
 const { Telegraf } = require('telegraf');
+const axios = require('axios');
 
-// خواندن توکن ربات از متغیرهای محیطی ورسل
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// دستور /start
-bot.start((ctx) => ctx.reply('سلام! به ربات متصل به ورسل خوش آمدید.'));
+bot.start((ctx) => ctx.reply('سلام! برای گرفتن وضعیت آب‌وهوا، دستور زیر را بفرست:\n\n /weather tehran'));
 
-// پاسخ به دستور /help
-bot.help((ctx) => ctx.reply('چطور می‌تونم کمکت کنم؟'));
+// دستور گرفتن آب‌وهوا
+bot.command('weather', async (ctx) => {
+    // گرفتن نام شهر از پیام کاربر
+    const messageText = ctx.message.text;
+    const cityName = messageText.split(' ')[1]; // بخش دوم پیام بعد از فاصله
 
-// پاسخ به پیام‌های متنی ساده
-bot.on('text', (ctx) => {
-    const text = ctx.message.text;
-    ctx.reply(`شما گفتی: ${text}`);
+    if (!cityName) {
+        return ctx.reply('لطفاً نام شهر را به انگلیسی وارد کنید. مثلاً:\n /weather tehran');
+    }
+
+    try {
+        // ارسال درخواست به یک API رایگان آب‌وهوا
+        const response = await axios.get(`https://wttr.in/${cityName}?format=j1`);
+        
+        // استخراج اطلاعات دما و وضعیت
+        const currentCondition = response.data.current_condition[0];
+        const temp = currentCondition.temp_C;
+        const weatherDesc = currentCondition.weatherDesc[0].value;
+        const humidity = currentCondition.humidity;
+
+        const report = `🌤 وضعیت آب و هوای شهر *${cityName.toUpperCase()}*:\n\n` +
+                       `🌡 دما: ${temp}°C\n` +
+                       `💧 رطوبت: ${humidity}%\n` +
+                       `📝 وضعیت: ${weatherDesc}`;
+
+        ctx.replyWithMarkdown(report);
+
+    } catch (error) {
+        console.error(error);
+        ctx.reply('خطایی در دریافت اطلاعات رخ داد. مطمئن شو که نام شهر را درست و به انگلیسی وارد کردی.');
+    }
 });
 
-// این بخش اصلی برای هماهنگی با وب‌هووک ورسل است
+// این بخش برای هماهنگی با وب‌هووک ورسل است
 module.exports = async (req, res) => {
     try {
-        // مطمئن می‌شویم که درخواست فقط از نوع POST (از طرف تلگرام) باشد
         if (req.method === 'POST') {
             await bot.handleUpdate(req.body, res);
         } else {
