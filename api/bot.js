@@ -9,7 +9,7 @@ const mainMenu = Markup.keyboard([
     ['🌤 وضعیت آب و هوا']
 ]).resize();
 
-// ۲. منوی انتخاب شهرها (که جایگزین کیبورد اصلی می‌شود)
+// ۲. منوی انتخاب شهرها
 const weatherMenu = Markup.keyboard([
     ['📍 تهران', '📍 یاسوج'],
     ['📍 دهدشت', '🔙 بازگشت به منوی اصلی']
@@ -25,12 +25,12 @@ bot.hears('🔙 بازگشت به منوی اصلی', (ctx) => {
     ctx.reply('به منوی اصلی برگشتید:', mainMenu);
 });
 
-// وقتی کاربر دکمه آب و هوا را می‌زند، منوی شهرها باز می‌شود
+// وقتی کاربر دکمه آب و هوا را می‌زند
 bot.hears('🌤 وضعیت آب و هوا', (ctx) => {
     ctx.reply('لطفاً شهر مورد نظر خود را انتخاب کنید:', weatherMenu);
 });
 
-// تابع مشترک برای گرفتن آب و هوا بر اساس نام انگلیسی شهر
+// تابع مشترک برای گرفتن آب و هوا
 async function getWeatherData(ctx, cityNameEn, cityNameFa) {
     try {
         const response = await axios.get(`https://wttr.in/${cityNameEn}?format=j1`);
@@ -56,18 +56,31 @@ bot.hears('📍 یاسوج', (ctx) => getWeatherData(ctx, 'yasuj', 'یاسوج')
 bot.hears('📍 دهدشت', (ctx) => getWeatherData(ctx, 'dehdasht', 'دهدشت'));
 
 
-// ۳. بخش قیمت ارزهای دیجیتال از صرافی بایننس (Binance)
+// ۳. بخش اصلاح‌شده قیمت ارزهای دیجیتال (بایننس + سرور پشتیبان تعاملی)
 bot.hears('📊 قیمت ارز دیجیتال', async (ctx) => {
-    await ctx.reply('🔄 در حال دریافت قیمت‌های لحظه‌ای از صرافی بایننس...');
+    await ctx.reply('🔄 در حال دریافت قیمت‌های لحظه‌ای...');
+    
+    const cryptoList = [
+        { symbol: 'BTC', binancePair: 'BTCUSDT' },
+        { symbol: 'ETH', binancePair: 'ETHUSDT' },
+        { symbol: 'SOL', binancePair: 'SOLUSDT' },
+        { symbol: 'TON', binancePair: 'TONUSDT' },
+        { symbol: 'XRP', binancePair: 'XRPUSDT' },
+        { symbol: 'NEAR', binancePair: 'NEARUSDT' },
+        { symbol: 'SUI', binancePair: 'SUIUSDT' },
+        { symbol: 'ADA', binancePair: 'ADAUSDT' },
+        { symbol: 'CRV', binancePair: 'CRVUSDT' }
+    ];
+
     try {
-        const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'TONUSDT', 'XRPUSDT', 'NEARUSDT', 'SUIUSDT', 'ADAUSDT', 'CRVUSDT'];
-        const url = `https://api.binance.com/api/v3/ticker/24hr?symbols=${JSON.stringify(symbols)}`;
+        // روش اول: درخواست مستقیم به بایننس با فرمت دقیق انکود شده
+        const symbolsParam = JSON.stringify(cryptoList.map(c => c.binancePair));
+        const url = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(symbolsParam)}`;
         
-        const response = await axios.get(url);
+        const response = await axios.get(url, { timeout: 4000 }); // تایم‌اوت ۴ ثانیه‌ای برای سوییچ سریع در صورت خرابی
         const tickerList = response.data;
 
-        let report = `📊 **قیمت لحظه‌ای رمزارزها در صرافی Binance:**\n\n`;
-
+        let report = `📊 **قیمت لحظه‌ای رمزارزها (صرافی Binance):**\n\n`;
         tickerList.forEach(coin => {
             const symbol = coin.symbol.replace('USDT', '');
             const price = parseFloat(coin.lastPrice);
@@ -79,11 +92,39 @@ bot.hears('📊 قیمت ارز دیجیتال', async (ctx) => {
 
             report += `🪙 **${symbol}**: $${formattedPrice} (${emoji} ${plusSign}${change.toFixed(2)}%)\n`;
         });
-
         report += `\n⏰ _قیمت‌ها کاملاً زنده و بدون تأخیر هستند._`;
-        ctx.replyWithMarkdown(report);
-    } catch (error) {
-        ctx.reply('❌ مشکلی در دریافت قیمت‌ها از بایننس رخ داد.');
+        return ctx.replyWithMarkdown(report);
+
+    } catch (binanceError) {
+        console.log('Binance API failed or blocked, trying backup API...');
+        
+        // روش دوم (پشتیبان): اگر بایننس قطع بود یا آی‌پی ورسل را بلاک کرد، از این سرور کمکی استفاده می‌شود
+        try {
+            const fsyms = cryptoList.map(c => c.symbol).join(',');
+            const backupUrl = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${fsyms}&tsyms=USD`;
+            
+            const backupResponse = await axios.get(backupUrl);
+            const displayData = backupResponse.data.DISPLAY;
+
+            let report = `📊 **قیمت لحظه‌ای رمزارزها (سرور پشتیبان کریپتو):**\n\n`;
+            cryptoList.forEach(c => {
+                if (displayData && displayData[c.symbol] && displayData[c.symbol].USD) {
+                    const coinInfo = displayData[c.symbol].USD;
+                    const price = coinInfo.PRICE;
+                    const change = coinInfo.CHANGEPCT24HOUR;
+                    const emoji = parseFloat(change) >= 0 ? '🟢' : '🔴';
+                    const plusSign = parseFloat(change) >= 0 ? '+' : '';
+
+                    report += `🪙 **${c.symbol}**: ${price} (${emoji} ${plusSign}${parseFloat(change).toFixed(2)}%)\n`;
+                }
+            });
+            report += `\n⏰ _داده‌ها از سرور پشتیبان بارگذاری شدند._`;
+            return ctx.replyWithMarkdown(report);
+
+        } catch (backupError) {
+            console.error(backupError);
+            return ctx.reply('❌ متأسفانه ارتباط با تمام سرورهای قیمت‌گذاری قطع شده است. لطفاً چند لحظه دیگر امتحان کنید.');
+        }
     }
 });
 
