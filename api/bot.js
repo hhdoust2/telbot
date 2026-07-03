@@ -1,15 +1,16 @@
 const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 
+// راه‌اندازی ربات با توکن ذخیره شده در متغیرهای محیطی ورسل
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// ۱. منوی اصلی ربات
+// ۱. تعریف منوی اصلی ربات (کیبورد پایین صفحه)
 const mainMenu = Markup.keyboard([
     ['📊 قیمت ارز دیجیتال', '🤖 سوال از هوش مصنوعی'],
     ['🌤 وضعیت آب و هوا']
 ]).resize();
 
-// ۲. منوی انتخاب شهرها
+// ۲. تعریف منوی انتخاب شهرها برای بخش آب‌وهوا
 const weatherMenu = Markup.keyboard([
     ['📍 تهران', '📍 یاسوج'],
     ['📍 دهدشت', '🔙 بازگشت به منوی اصلی']
@@ -17,20 +18,20 @@ const weatherMenu = Markup.keyboard([
 
 // دستور /start
 bot.start((ctx) => {
-    ctx.reply('سلام! به ربات پیشرفته خوش آمدید. یکی از گزینه‌های زیر را انتخاب کنید:', mainMenu);
+    ctx.reply('سلام! به ربات پیشرفته خود خوش آمدید. یکی از گزینه‌های زیر را انتخاب کنید:', mainMenu);
 });
 
-// بازگشت به منوی اصلی
+// دکمه بازگشت به منوی اصلی
 bot.hears('🔙 بازگشت به منوی اصلی', (ctx) => {
     ctx.reply('به منوی اصلی برگشتید:', mainMenu);
 });
 
-// وقتی کاربر دکمه آب و هوا را می‌زند
+// وقتی کاربر روی دکمه آب و هوا کلیک می‌کند، منوی شهرها ظاهر می‌شود
 bot.hears('🌤 وضعیت آب و هوا', (ctx) => {
     ctx.reply('لطفاً شهر مورد نظر خود را انتخاب کنید:', weatherMenu);
 });
 
-// تابع مشترک برای گرفتن آب و هوا
+// تابع مشترک برای دریافت داده‌های آب‌وهوا از سرویس wttr.in
 async function getWeatherData(ctx, cityNameEn, cityNameFa) {
     try {
         const response = await axios.get(`https://wttr.in/${cityNameEn}?format=j1`);
@@ -50,85 +51,91 @@ async function getWeatherData(ctx, cityNameEn, cityNameFa) {
     }
 }
 
-// پاسخ به دکمه‌های هر شهر
+// گوش دادن به دکمه‌های مربوط به هر شهر
 bot.hears('📍 تهران', (ctx) => getWeatherData(ctx, 'tehran', 'تهران'));
 bot.hears('📍 یاسوج', (ctx) => getWeatherData(ctx, 'yasuj', 'یاسوج'));
 bot.hears('📍 دهدشت', (ctx) => getWeatherData(ctx, 'dehdasht', 'دهدشت'));
 
-
-// ۳. بخش اصلاح‌شده قیمت ارزهای دیجیتال (بایننس + سرور پشتیبان تعاملی)
+// ۳. بخش پیشرفته قیمت ارز دیجیتال با استفاده از Klines بایننس و فالبک پشتیبان
 bot.hears('📊 قیمت ارز دیجیتال', async (ctx) => {
-    await ctx.reply('🔄 در حال دریافت قیمت‌های لحظه‌ای...');
+    await ctx.reply('🔄 در حال دریافت دقیق‌ترین قیمت‌ها از چارت بایننس...');
     
-    const cryptoList = [
-        { symbol: 'BTC', binancePair: 'BTCUSDT' },
-        { symbol: 'ETH', binancePair: 'ETHUSDT' },
-        { symbol: 'SOL', binancePair: 'SOLUSDT' },
-        { symbol: 'TON', binancePair: 'TONUSDT' },
-        { symbol: 'XRP', binancePair: 'XRPUSDT' },
-        { symbol: 'NEAR', binancePair: 'NEARUSDT' },
-        { symbol: 'SUI', binancePair: 'SUIUSDT' },
-        { symbol: 'ADA', binancePair: 'ADAUSDT' },
-        { symbol: 'CRV', binancePair: 'CRVUSDT' }
-    ];
-
+    // لیست دقیق رمزارزهای درخواستی شما
+    const symbols = ['BTC', 'ETH', 'SOL', 'TON', 'XRP', 'NEAR', 'SUI', 'ADA', 'CRV'];
+    
     try {
-        // روش اول: درخواست مستقیم به بایننس با فرمت دقیق انکود شده
-        const symbolsParam = JSON.stringify(cryptoList.map(c => c.binancePair));
-        const url = `https://api.binance.com/api/v3/ticker/24hr?symbols=${encodeURIComponent(symbolsParam)}`;
-        
-        const response = await axios.get(url, { timeout: 4000 }); // تایم‌اوت ۴ ثانیه‌ای برای سوییچ سریع در صورت خرابی
-        const tickerList = response.data;
-
-        let report = `📊 **قیمت لحظه‌ای رمزارزها (صرافی Binance):**\n\n`;
-        tickerList.forEach(coin => {
-            const symbol = coin.symbol.replace('USDT', '');
-            const price = parseFloat(coin.lastPrice);
-            const change = parseFloat(coin.priceChangePercent);
-            
-            const formattedPrice = price >= 1 ? price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : price;
-            const emoji = change >= 0 ? '🟢' : '🔴';
-            const plusSign = change >= 0 ? '+' : '';
-
-            report += `🪙 **${symbol}**: $${formattedPrice} (${emoji} ${plusSign}${change.toFixed(2)}%)\n`;
+        // ارسال همزمان درخواست کلاینز روزانه برای تک‌تک ارزها به ساب‌دامنه رسمی api1 بایننس
+        const promises = symbols.map(async (symbol) => {
+            try {
+                const url = `https://api1.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1d&limit=1`;
+                const response = await axios.get(url, { timeout: 3500 });
+                
+                const lastCandle = response.data[0];
+                const closePrice = parseFloat(lastCandle[4]); // قیمت بسته شدن کندل (قیمت فعلی)
+                const openPrice = parseFloat(lastCandle[1]);  // قیمت باز شدن کندل روزانه
+                
+                // محاسبه دقیق درصد تغییرات روزانه
+                const changePercent = ((closePrice - openPrice) / openPrice) * 100;
+                
+                return { symbol, price: closePrice, change: changePercent, success: true };
+            } catch (err) {
+                // در صورت خطای یک ارز، بقیه ارزها خراب نمی‌شوند
+                return { symbol, success: false };
+            }
         });
-        report += `\n⏰ _قیمت‌ها کاملاً زنده و بدون تأخیر هستند._`;
+
+        const results = await Promise.all(promises);
+
+        let report = `📊 **قیمت لحظه‌ای رمزارزها (Binance Klines):**\n\n`;
+        let hasAtLeastOneSuccess = false;
+
+        results.forEach(coin => {
+            if (coin.success) {
+                hasAtLeastOneSuccess = true;
+                const formattedPrice = coin.price >= 1 ? coin.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : coin.price;
+                const emoji = coin.change >= 0 ? '🟢' : '🔴';
+                const plusSign = coin.change >= 0 ? '+' : '';
+                report += `🪙 **${coin.symbol}**: $${formattedPrice} (${emoji} ${plusSign}${coin.change.toFixed(2)}%)\n`;
+            } else {
+                report += `❌ **${coin.symbol}**: خطا در بارگذاری از بایننس\n`;
+            }
+        });
+
+        // اگر بایننس کلاً سرور ورسل را بلاک کرده باشد، سیستم سوییچ می‌کند روی سرور پشتیبان
+        if (!hasAtLeastOneSuccess) {
+            throw new Error("All Binance requests blocked");
+        }
+
+        report += `\n⏰ _داده‌ها مستقیم از کندل‌های روزانه صرافی استخراج شده‌اند._`;
         return ctx.replyWithMarkdown(report);
 
-    } catch (binanceError) {
-        console.log('Binance API failed or blocked, trying backup API...');
+    } catch (globalError) {
+        console.log('Binance Klines failed, switching to backup API...');
         
-        // روش دوم (پشتیبان): اگر بایننس قطع بود یا آی‌پی ورسل را بلاک کرد، از این سرور کمکی استفاده می‌شود
+        // سرور پشتیبان بدون محدودیت IP و تحریم (CryptoCompare) برای مواقع اضطراری
         try {
-            const fsyms = cryptoList.map(c => c.symbol).join(',');
+            const fsyms = symbols.join(',');
             const backupUrl = `https://min-api.cryptocompare.com/data/pricemultifull?fsyms=${fsyms}&tsyms=USD`;
-            
             const backupResponse = await axios.get(backupUrl);
             const displayData = backupResponse.data.DISPLAY;
 
             let report = `📊 **قیمت لحظه‌ای رمزارزها (سرور پشتیبان کریپتو):**\n\n`;
-            cryptoList.forEach(c => {
-                if (displayData && displayData[c.symbol] && displayData[c.symbol].USD) {
-                    const coinInfo = displayData[c.symbol].USD;
-                    const price = coinInfo.PRICE;
-                    const change = coinInfo.CHANGEPCT24HOUR;
-                    const emoji = parseFloat(change) >= 0 ? '🟢' : '🔴';
-                    const plusSign = parseFloat(change) >= 0 ? '+' : '';
-
-                    report += `🪙 **${c.symbol}**: ${price} (${emoji} ${plusSign}${parseFloat(change).toFixed(2)}%)\n`;
+            symbols.forEach(sym => {
+                if (displayData && displayData[sym] && displayData[sym].USD) {
+                    const coinInfo = displayData[sym].USD;
+                    const emoji = parseFloat(coinInfo.CHANGEPCT24HOUR) >= 0 ? '🟢' : '🔴';
+                    report += `🪙 **${sym}**: ${coinInfo.PRICE} (${emoji} ${coinInfo.CHANGEPCT24HOUR}%)\n`;
                 }
             });
-            report += `\n⏰ _داده‌ها از سرور پشتیبان بارگذاری شدند._`;
+            report += `\n⏰ _به دلیل محدودیت بایننس، داده‌ها از سرور پشتیبان بارگذاری شدند._`;
             return ctx.replyWithMarkdown(report);
-
         } catch (backupError) {
-            console.error(backupError);
-            return ctx.reply('❌ متأسفانه ارتباط با تمام سرورهای قیمت‌گذاری قطع شده است. لطفاً چند لحظه دیگر امتحان کنید.');
+            return ctx.reply('❌ در حال حاضر ارتباط با تمام سرورهای قیمت‌گذاری قطع است. لطفاً کمی بعد تلاش کنید.');
         }
     }
 });
 
-// ۴. بخش هوش مصنوعی
+// ۴. بخش هوش مصنوعی (اتصال به مدل رایگان لاما ۳ در OpenRouter)
 bot.hears('🤖 سوال از هوش مصنوعی', (ctx) => {
     ctx.reply('برای پرسش از هوش مصنوعی، متن خود را همراه با دستور /ai بفرستید. مثلاً:\n\n/ai چرا آسمان آبی است؟');
 });
@@ -157,19 +164,20 @@ bot.command('ai', async (ctx) => {
         const replyText = response.data.choices[0].message.content;
         ctx.reply(replyText);
     } catch (error) {
-        ctx.reply('❌ مشکلی در اتصال به هوش مصنوعی به وجود آمد.');
+        ctx.reply('❌ مشکلی در اتصال به هوش مصنوعی به وجود آمد. مطمئن شوید کلید OPENROUTER_API_KEY را در ورسل تنظیم کرده‌اید.');
     }
 });
 
-// بخش هماهنگی وب‌هووک ورسل
+// ۵. بخش هندلر اصلی وب‌هووک برای سازگاری با توابع Serverless ورسل
 module.exports = async (req, res) => {
     try {
         if (req.method === 'POST') {
             await bot.handleUpdate(req.body, res);
         } else {
-            res.status(200).send('Bot is running...');
+            res.status(200).send('Bot is running successfully!');
         }
     } catch (error) {
+        console.error('Webhook Error:', error);
         res.status(500).send('Internal Server Error');
     }
 };
